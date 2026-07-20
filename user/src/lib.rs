@@ -230,7 +230,7 @@ impl UserManager {
     /// Pops open a browser window for the update URL. This is less encountered by users as time goes
     /// by, but still used.
     pub fn update_app(&self) -> bool {
-        if let Err(error) = open::that_detached("http://slippi.internal:8080/downloads?update=true") {
+        if let Err(error) = open::that_detached("https://github.com/CharlonTank/Ishiiruka/releases?update=true") {
             tracing::error!(target: Log::SlippiOnline, ?error, "Failed to open update URL");
             return false;
         }
