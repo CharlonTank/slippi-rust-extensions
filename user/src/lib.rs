@@ -20,7 +20,7 @@ use rank_fetcher::{RankFetcher, RankFetcherStatus, SlippiRank};
 mod watcher;
 use watcher::UserInfoWatcher;
 
-const USER_API_URL: &'static str = "https://users-rest-dot-slippi.uc.r.appspot.com/user";
+const USER_API_URL: &'static str = "http://slippi.internal:8080/user";
 
 /// The core payload that represents user information. This type is expected to conform
 /// to the same definition that the remote server uses.
@@ -213,7 +213,7 @@ impl UserManager {
         let path_ref = self.user_json_path.as_path();
 
         if let Some(path) = path_ref.to_str() {
-            let url = format!("https://slippi.gg/online/enable?path={path}");
+            let url = format!("http://slippi.internal:8080/online/enable?path={path}");
 
             tracing::info!(target: Log::SlippiOnline, "[User] Login at path: {}", url);
 
@@ -230,7 +230,7 @@ impl UserManager {
     /// Pops open a browser window for the update URL. This is less encountered by users as time goes
     /// by, but still used.
     pub fn update_app(&self) -> bool {
-        if let Err(error) = open::that_detached("https://slippi.gg/downloads?update=true") {
+        if let Err(error) = open::that_detached("http://slippi.internal:8080/downloads?update=true") {
             tracing::error!(target: Log::SlippiOnline, ?error, "Failed to open update URL");
             return false;
         }

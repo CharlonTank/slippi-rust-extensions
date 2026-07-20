@@ -56,7 +56,7 @@ impl GraphQLBuilder {
 
         Self {
             client,
-            endpoint: Cow::Borrowed("https://internal.slippi.gg/graphql"),
+            endpoint: Cow::Borrowed("http://slippi.internal:8080/graphql"),
             response_field: None,
             body,
             request_timeout: super::default_timeout(),
