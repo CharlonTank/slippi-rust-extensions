@@ -56,7 +56,7 @@ impl GraphQLBuilder {
 
         Self {
             client,
-            endpoint: Cow::Borrowed("http://api.ssbm.live:8080/graphql"),
+            endpoint: Cow::Borrowed("https://api.ssbm.live/graphql"),
             response_field: None,
             body,
             request_timeout: super::default_timeout(),

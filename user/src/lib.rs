@@ -20,7 +20,7 @@ use rank_fetcher::{RankFetcher, RankFetcherStatus, SlippiRank};
 mod watcher;
 use watcher::UserInfoWatcher;
 
-const USER_API_URL: &'static str = "http://api.ssbm.live:8080/user";
+const USER_API_URL: &'static str = "https://api.ssbm.live/user";
 
 /// The core payload that represents user information. This type is expected to conform
 /// to the same definition that the remote server uses.
@@ -213,7 +213,7 @@ impl UserManager {
         let path_ref = self.user_json_path.as_path();
 
         if let Some(path) = path_ref.to_str() {
-            let url = format!("http://api.ssbm.live:8080/online/enable?path={path}");
+            let url = format!("https://api.ssbm.live/online/enable?path={path}");
 
             tracing::info!(target: Log::SlippiOnline, "[User] Login at path: {}", url);
 
