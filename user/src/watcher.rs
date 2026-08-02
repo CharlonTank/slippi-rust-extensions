@@ -65,6 +65,10 @@ impl UserInfoWatcher {
                     }
 
                     if attempt_login(&client, &user, &rank, &rank_fetcher_status, &json_path, &semver) {
+                        // Clear the flag on the way out: leaving it set made
+                        // every later `watch_for_login` a no-op against a dead
+                        // thread, so a mid-session re-login never got watched.
+                        should_watch.store(false, Ordering::Relaxed);
                         return;
                     }
 

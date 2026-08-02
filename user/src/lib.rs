@@ -223,10 +223,18 @@ impl UserManager {
         }
 
         let path = self.user_json_path.clone();
+        let api_client = self.api_client.clone();
+        let user = self.user.clone();
+        let rank = self.rank.clone();
+        let rank_fetcher_status = self.rank_fetcher.status.clone();
+        let semver = self.slippi_semver.clone();
         std::thread::spawn(move || {
             match run_device_activation(&path) {
                 Ok(()) => {
-                    tracing::info!(target: Log::SlippiOnline, "[User] Device activation complete");
+                    // Complete the login ourselves, right now — don't depend
+                    // on the watcher thread being alive to notice the file.
+                    let ok = attempt_login(&api_client, &user, &rank, &rank_fetcher_status, &path, &semver);
+                    tracing::info!(target: Log::SlippiOnline, ok, "[User] Device activation complete");
                 }
                 Err(error) => {
                     tracing::warn!(target: Log::SlippiOnline, %error, "[User] Device activation failed, opening manual page");
