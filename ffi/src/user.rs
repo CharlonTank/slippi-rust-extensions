@@ -304,3 +304,22 @@ pub extern "C" fn slprs_user_direct_codes_free_code(code: *mut c_char) {
         }
     }
 }
+
+/// Runs device-flow login WITHOUT a running game: the Dolphin window itself
+/// can log the player in before Melee boots, which is what makes the in-game
+/// menu correct from its very first frame (Melee only builds the Online Play
+/// submenu when you enter it, so logging in while sitting on it can't update
+/// it). Blocks the calling thread — call it off the UI thread.
+///
+/// `user_json_path` is the absolute path Dolphin uses for `user.json`.
+#[unsafe(no_mangle)]
+pub extern "C" fn slprs_user_device_login(user_json_path: *const c_char) -> bool {
+    let path = c_str_to_string(user_json_path, "slprs_user_device_login", "user_json_path");
+    match slippi_user::run_device_activation(&std::path::PathBuf::from(path)) {
+        Ok(()) => true,
+        Err(error) => {
+            tracing::warn!(target: dolphin_integrations::Log::SlippiOnline, %error, "Standalone device login failed");
+            false
+        }
+    }
+}

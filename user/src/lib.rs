@@ -418,7 +418,7 @@ fn open_download_page() {
 /// Runs the device-flow activation end to end: start → open browser → poll →
 /// write `user.json`. Any error string bubbles up so the caller can fall back
 /// to the manual page.
-fn run_device_activation(user_json_path: &PathBuf) -> Result<(), String> {
+pub fn run_device_activation(user_json_path: &PathBuf) -> Result<(), String> {
     let start: serde_json::Value = ureq::post("https://api.ssbm.live/online/device/start")
         .timeout(std::time::Duration::from_secs(10))
         .call()

@@ -412,6 +412,17 @@ char *slprs_user_direct_codes_get_code_at_index(uintptr_t exi_device_instance_pt
  */
 void slprs_user_direct_codes_free_code(char *code);
 
+/**
+ * Runs device-flow login WITHOUT a running game: the Dolphin window itself
+ * can log the player in before Melee boots, which is what makes the in-game
+ * menu correct from its very first frame (Melee only builds the Online Play
+ * submenu when you enter it, so logging in while sitting on it can't update
+ * it). Blocks the calling thread — call it off the UI thread.
+ *
+ * `user_json_path` is the absolute path Dolphin uses for `user.json`.
+ */
+bool slprs_user_device_login(const char *user_json_path);
+
 #ifdef __cplusplus
 }  // extern "C"
 #endif  // __cplusplus
