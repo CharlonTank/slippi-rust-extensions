@@ -237,13 +237,37 @@ impl UserManager {
         });
     }
 
-    /// Pops open a browser window for the update URL. This is less encountered by users as time goes
-    /// by, but still used.
+    /// Fetches the update for THIS platform and reveals it, ready to install —
+    /// no releases page, no choosing a file. Falls back to opening the
+    /// download page (which also auto-starts the right download) if fetching
+    /// fails, so the player is never left with nothing.
     pub fn update_app(&self) -> bool {
-        if let Err(error) = open::that_detached("https://github.com/CharlonTank/Ishiiruka/releases?update=true") {
-            tracing::error!(target: Log::SlippiOnline, ?error, "Failed to open update URL");
-            return false;
+        use std::sync::atomic::{AtomicBool, Ordering};
+        static UPDATE_RUNNING: AtomicBool = AtomicBool::new(false);
+
+        if UPDATE_RUNNING.swap(true, Ordering::SeqCst) {
+            tracing::info!(target: Log::SlippiOnline, "[Update] Already downloading");
+            return true;
         }
+
+        std::thread::spawn(move || {
+            match download_update() {
+                Ok(path) => {
+                    tracing::info!(target: Log::SlippiOnline, ?path, "[Update] Downloaded");
+                    // Opens the .dmg (mounts it) or reveals the .zip — one
+                    // drag away from installed.
+                    if let Err(error) = open::that_detached(&path) {
+                        tracing::error!(target: Log::SlippiOnline, ?error, "[Update] Failed to open download");
+                        open_download_page();
+                    }
+                }
+                Err(error) => {
+                    tracing::warn!(target: Log::SlippiOnline, %error, "[Update] Download failed, opening page");
+                    open_download_page();
+                }
+            }
+            UPDATE_RUNNING.store(false, Ordering::SeqCst);
+        });
 
         true
     }
@@ -294,6 +318,92 @@ impl UserManager {
         let mut watcher = self.watcher.lock().expect("Unable to acquire watcher lock on user logout");
 
         watcher.logout();
+    }
+}
+
+/// Which release asset this build needs. The server maps this to a URL, so
+/// the download can move without shipping a new client.
+fn update_os() -> &'static str {
+    if cfg!(target_os = "windows") {
+        "windows"
+    } else if cfg!(target_os = "macos") {
+        "macos"
+    } else {
+        "linux"
+    }
+}
+
+/// Downloads this platform's update into the user's Downloads folder (or the
+/// temp dir) and returns the file path.
+fn download_update() -> Result<PathBuf, String> {
+    let os = update_os();
+    let url = format!("https://api.ssbm.live/downloads/latest?os={os}");
+
+    let resp = ureq::get(&url)
+        .timeout(std::time::Duration::from_secs(600))
+        .call()
+        .map_err(|e| format!("download failed: {e}"))?;
+
+    // The server 302s at the release asset; ureq follows it, so the final URL
+    // carries the real filename.
+    let filename = resp
+        .get_url()
+        .rsplit('/')
+        .next()
+        .filter(|n| !n.is_empty() && !n.contains('?'))
+        .unwrap_or(match os {
+            "macos" => "slippi-dolphin-asia-update.dmg",
+            _ => "slippi-dolphin-asia-update.zip",
+        })
+        .to_string();
+
+    let dir = downloads_dir();
+    std::fs::create_dir_all(&dir).map_err(|e| format!("create {}: {e}", dir.display()))?;
+    let path = dir.join(&filename);
+
+    let mut reader = resp.into_reader();
+    let mut file = std::fs::File::create(&path).map_err(|e| format!("create {}: {e}", path.display()))?;
+    std::io::copy(&mut reader, &mut file).map_err(|e| format!("write {}: {e}", path.display()))?;
+    drop(file);
+
+    // A download landing here is Gatekeeper-quarantined on macOS; clearing it
+    // spares the player the "unidentified developer" dance.
+    #[cfg(target_os = "macos")]
+    {
+        let _ = std::process::Command::new("xattr")
+            .args(["-dr", "com.apple.quarantine"])
+            .arg(&path)
+            .status();
+    }
+
+    Ok(path)
+}
+
+/// The user's Downloads folder, falling back to the temp dir. Kept dependency
+/// free — the home var is the only thing all three platforms agree on.
+fn downloads_dir() -> PathBuf {
+    let home = if cfg!(target_os = "windows") {
+        std::env::var_os("USERPROFILE")
+    } else {
+        std::env::var_os("HOME")
+    };
+    match home {
+        Some(h) if !h.is_empty() => {
+            let candidate = PathBuf::from(h).join("Downloads");
+            if candidate.is_dir() {
+                candidate
+            } else {
+                std::env::temp_dir()
+            }
+        }
+        _ => std::env::temp_dir(),
+    }
+}
+
+/// Last-resort update path: the download page picks the right build itself.
+fn open_download_page() {
+    if let Err(error) = open::that_detached("https://api.ssbm.live/downloads") {
+        tracing::error!(target: Log::SlippiOnline, ?error, "Failed to open download page");
     }
 }
 
