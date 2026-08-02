@@ -207,24 +207,34 @@ impl UserManager {
         );
     }
 
-    /// Pops open a browser window for the older authentication flow. This is less encountered by
-    /// users as time goes on, but may still be used.
+    /// Logs the player in without ever making them touch a file: device-flow
+    /// activation. We ask the server for a short code, open the browser on
+    /// ssbm.live's activate page (one click for a signed-in member), poll
+    /// until approval, and write the delivered `user.json` ourselves — the
+    /// login watcher picks it up within 500ms. Falls back to the manual
+    /// download page if the flow can't start.
     pub fn open_login_page(&self) {
-        let path_ref = self.user_json_path.as_path();
+        use std::sync::atomic::{AtomicBool, Ordering};
+        static ACTIVATION_RUNNING: AtomicBool = AtomicBool::new(false);
 
-        if let Some(path) = path_ref.to_str() {
-            let url = format!("https://api.ssbm.live/online/enable?path={path}");
-
-            tracing::info!(target: Log::SlippiOnline, "[User] Login at path: {}", url);
-
-            if let Err(error) = open::that_detached(&url) {
-                tracing::error!(target: Log::SlippiOnline, ?error, ?url, "Failed to open login page");
-            }
-        } else {
-            // This should never really happen, but it's conceivable that some odd unicode path
-            // errors could happen... so just dump a log I guess.
-            tracing::warn!(target: Log::SlippiOnline, ?path_ref, "Unable to convert user.json path to UTF-8 string");
+        if ACTIVATION_RUNNING.swap(true, Ordering::SeqCst) {
+            tracing::info!(target: Log::SlippiOnline, "[User] Activation already in progress");
+            return;
         }
+
+        let path = self.user_json_path.clone();
+        std::thread::spawn(move || {
+            match run_device_activation(&path) {
+                Ok(()) => {
+                    tracing::info!(target: Log::SlippiOnline, "[User] Device activation complete");
+                }
+                Err(error) => {
+                    tracing::warn!(target: Log::SlippiOnline, %error, "[User] Device activation failed, opening manual page");
+                    open_manual_enable_page(&path);
+                }
+            }
+            ACTIVATION_RUNNING.store(false, Ordering::SeqCst);
+        });
     }
 
     /// Pops open a browser window for the update URL. This is less encountered by users as time goes
@@ -284,6 +294,89 @@ impl UserManager {
         let mut watcher = self.watcher.lock().expect("Unable to acquire watcher lock on user logout");
 
         watcher.logout();
+    }
+}
+
+/// Runs the device-flow activation end to end: start → open browser → poll →
+/// write `user.json`. Any error string bubbles up so the caller can fall back
+/// to the manual page.
+fn run_device_activation(user_json_path: &PathBuf) -> Result<(), String> {
+    let start: serde_json::Value = ureq::post("https://api.ssbm.live/online/device/start")
+        .timeout(std::time::Duration::from_secs(10))
+        .call()
+        .map_err(|e| format!("device/start failed: {e}"))?
+        .into_json()
+        .map_err(|e| format!("device/start bad response: {e}"))?;
+
+    let token = start["deviceToken"].as_str().ok_or("missing deviceToken")?.to_string();
+    let activate_url = start["activateUrl"].as_str().ok_or("missing activateUrl")?.to_string();
+    let expires_secs = start["expiresInSecs"].as_u64().unwrap_or(600);
+    let poll_secs = start["pollIntervalSecs"].as_u64().unwrap_or(2).clamp(1, 30);
+
+    tracing::info!(target: Log::SlippiOnline, url = %activate_url, "[User] Opening activation page");
+    if let Err(error) = open::that_detached(&activate_url) {
+        tracing::error!(target: Log::SlippiOnline, ?error, "Failed to open activation page");
+        // Keep polling anyway — the player can still open the URL by hand.
+    }
+
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(expires_secs);
+    while std::time::Instant::now() < deadline {
+        std::thread::sleep(std::time::Duration::from_secs(poll_secs));
+
+        let poll: serde_json::Value = match ureq::post("https://api.ssbm.live/online/device/poll")
+            .timeout(std::time::Duration::from_secs(10))
+            .send_json(serde_json::json!({ "deviceToken": token }))
+        {
+            Ok(resp) => resp.into_json().map_err(|e| format!("device/poll bad response: {e}"))?,
+            // Transient network hiccups shouldn't kill the whole activation.
+            Err(error) => {
+                tracing::warn!(target: Log::SlippiOnline, %error, "[User] Poll attempt failed, retrying");
+                continue;
+            }
+        };
+
+        match poll["status"].as_str() {
+            Some("approved") => {
+                let user = &poll["user"];
+                if user["uid"].as_str().map_or(true, str::is_empty) {
+                    return Err("approved payload missing uid".to_string());
+                }
+                let body = serde_json::to_string_pretty(user)
+                    .map_err(|e| format!("serialize user.json: {e}"))?;
+                if let Some(parent) = user_json_path.parent() {
+                    std::fs::create_dir_all(parent)
+                        .map_err(|e| format!("create {}: {e}", parent.display()))?;
+                }
+                std::fs::write(user_json_path.as_path(), body)
+                    .map_err(|e| format!("write {}: {e}", user_json_path.display()))?;
+                // The login watcher polls this path every 500ms and completes
+                // the login — nothing else to do.
+                return Ok(());
+            }
+            Some("pending") => continue,
+            Some("expired") | _ => return Err("activation expired or was rejected".to_string()),
+        }
+    }
+    Err("activation timed out".to_string())
+}
+
+/// The pre-device-flow fallback: opens the page that serves a manual
+/// `user.json` download with save-to instructions.
+fn open_manual_enable_page(user_json_path: &PathBuf) {
+    let path_ref = user_json_path.as_path();
+
+    if let Some(path) = path_ref.to_str() {
+        let url = format!("https://api.ssbm.live/online/enable?path={path}");
+
+        tracing::info!(target: Log::SlippiOnline, "[User] Login at path: {}", url);
+
+        if let Err(error) = open::that_detached(&url) {
+            tracing::error!(target: Log::SlippiOnline, ?error, ?url, "Failed to open login page");
+        }
+    } else {
+        // This should never really happen, but it's conceivable that some odd unicode path
+        // errors could happen... so just dump a log I guess.
+        tracing::warn!(target: Log::SlippiOnline, ?path_ref, "Unable to convert user.json path to UTF-8 string");
     }
 }
 
