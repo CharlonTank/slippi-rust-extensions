@@ -12,6 +12,7 @@ pub enum OnlinePlayMode {
     Unranked = 1,
     Direct = 2,
     Teams = 3,
+    Party = 4,
 }
 
 /// Describes metadata about a game that we need to log to the server.
@@ -56,6 +57,11 @@ pub struct PlayerReport {
 
     #[serde(rename = "colorId")]
     pub color_id: u8,
+
+    /// Which team this player fought on (game info block 0x69): 0/1/2, or -1
+    /// outside team modes. Powers ranked-doubles finalization server-side.
+    #[serde(rename = "teamId")]
+    pub team_id: i8,
 
     #[serde(rename = "startingStocks")]
     pub starting_stocks: i64,

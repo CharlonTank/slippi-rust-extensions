@@ -28,6 +28,7 @@ typedef enum SlippiMatchmakingOnlinePlayMode {
   Unranked = 1,
   Direct = 2,
   Teams = 3,
+  Party = 4,
 } SlippiMatchmakingOnlinePlayMode;
 
 /**
@@ -194,7 +195,8 @@ uintptr_t slprs_player_report_create(const char *uid,
                                      uint8_t character_id,
                                      uint8_t color_id,
                                      int64_t starting_stocks,
-                                     int64_t starting_percent);
+                                     int64_t starting_percent,
+                                     int8_t team_id);
 
 /**
  * Creates a new GameReport and leaks it, returning the instance pointer
